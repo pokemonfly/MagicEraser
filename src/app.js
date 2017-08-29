@@ -9,7 +9,10 @@ import template from './template';
             pic: null,
             canvas: 'canvas',
             outputCanvas: 'output_canvas',
-            fabric: fabric
+            fabric: fabric,
+            width: 800,
+            height: 800,
+            scale: 0.625
         }, opt );
         let core = new Core( opt );
         core.init( );

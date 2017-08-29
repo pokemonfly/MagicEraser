@@ -5,11 +5,15 @@ let canvas,
     output_canvas;
 class Core {
     constructor( opt ) {
-        canvas = new fabric.Canvas( opt.canvas )
+        const { scale, width, height } = opt
+        canvas = new fabric.Canvas(opt.canvas, { scale, width, height })
         output_canvas = document.getElementById( opt.outputCanvas )
 
-        this.width = canvas.getWidth( )
-        this.height = canvas.getHeight( )
+        console.log( opt )
+        // this.width = canvas.getWidth( ) this.height = canvas.getHeight( )
+        this.width = width
+        this.height = height
+        this.scale = 1
 
         this.delta_left = 0
         this.delta_top = 0
@@ -26,8 +30,7 @@ class Core {
             'options': {
                 'pf': null,
                 'slic': {
-                    regionSize: 30,
-                    minSize: 20
+                    regionSize: 40
                 }
             },
             current_mode: null,
@@ -37,7 +40,11 @@ class Core {
     }
 
     init( ) {
-        canvas.on( 'object:selected', this.updateScope ).on( 'group:selected', this.updateScope ).on( 'path:created', this.updateScope ).on( 'selection:cleared', this.updateScope );
+        canvas.on( 'object:selected', this.updateScope )
+        canvas.on( 'group:selected', this.updateScope )
+        canvas.on( 'path:created', this.updateScope )
+        canvas.on( 'selection:cleared', this.updateScope );
+        canvas.on( 'object:moving', this.moveHandler )
 
         this.$window = $( window )
         this.$canvas = $( '#canvas' )
@@ -57,10 +64,60 @@ class Core {
     updateScope( ) {
         canvas.renderAll( );
     }
+    moveHandler = ({ target }) => {
+        // this._checkPos( target ); 遍历其他的图层 同步移动缩放
+        canvas.forEachObject(( obj ) => {
+            if (!obj.isType( 'image' )) {
+                obj.setLeft( target.getLeft( ) + obj._left )
+                obj.setTop( target.getTop( ) + obj._top )
+            }
+        });
+        canvas.sendToBack( target );
+        canvas.deactivateAll( ).renderAll( )
+    }
+
+    setZoom( scale ) {
+        canvas.setZoom( this.scale );
+        this.updateScope( )
+    }
+    _checkPos( obj ) {
+        var left = obj.getLeft( ),
+            top = obj.getTop( ),
+            vp = this.scale,
+            cleft = obj.left,
+            ctop = obj.top;
+        if ( left > 0 ) {
+            obj.left = 0;
+        } else if (obj.left * vp < canvas.width * ( 1 - vp )) {
+            obj.left = canvas.width * ( 1 - vp ) / vp;
+        }
+        if ( top > 0 ) {
+            obj.setTop( 0 );
+        } else if (obj.top * vp < canvas.height * ( 1 - vp )) {
+            obj.top = canvas.height * ( 1 - vp ) / vp;
+        }
+        if ( cleft != obj.left || ctop != obj.top ) {
+            setTimeout( function ( ) {
+                canvas.deactivateAll( ).renderAll( );
+            }, 50);
+        }
+    }
     addPic( src ) {
+        if ( this.mainPic ) {
+            console.log( 'replace old main pic' )
+            canvas.remove( this.mainPic )
+        }
         fabric.Image.fromURL(src, ( oImg ) => {
+            oImg.evented = false;
+            oImg.selectable = false;
+            this.mainPic = oImg;
             canvas.add( oImg );
         });
+    }
+    activeMainPic( ) {
+        this.mainPic.selectable = true;
+        this.mainPic.evented = true;
+        canvas.isDrawingMode = false;
     }
     mover_cursor = ( options ) => {
         this.$yax.css({
@@ -121,10 +178,8 @@ class Core {
         setActiveStyle( 'scaleY', parseInt( value, 10 ) / 100 );
     }
 
-    confirmClear( ) {
-        if (confirm( 'Remove everything including images. Are you sure?' )) {
-            canvas.clear( );
-        }
+    clear( ) {
+        canvas.clear( );
     }
     confirmClearMasks( ) {
         if (confirm( 'Remove all masks. Are you sure?' )) {
@@ -177,6 +232,9 @@ class Core {
         canvas.renderAll( );
     }
 
+    getResult( ) {
+        return output_canvas.toDataURL( 'png' );
+    }
     export( ) {
         if (!fabric.Canvas.supports( 'toDataURL' )) {
             alert( 'This browser doesn\'t provide means to serialize canvas to an image' );
@@ -194,7 +252,8 @@ class Core {
         if (!fabric.Canvas.supports( 'toDataURL' )) {
             alert( 'This browser doesn\'t provide means to serialize canvas to an image' );
         } else {
-            window.open(output_canvas.toDataURL( 'png' ));
+            var win = window.open( );
+            win.document.write( '<iframe src="' + this.getResult( ) + '" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>' )
         }
     }
 
@@ -216,6 +275,7 @@ class Core {
     }
 
     resetZoom( ) {
+        const { state } = this;
         var newZoom = 1.0;
         canvas.absolutePan({ x: 0, y: 0 });
         canvas.setZoom( newZoom );
@@ -257,19 +317,32 @@ class Core {
             return canvas.isDrawingMode
         }
     }
-    setFreeDrawingMode( value, mode ) {
+    setFreeDrawingMode({ value, mode, color, cursor, width }) {
+        if ( this.mainPic ) {
+            this.mainPic.selectable = false;
+            this.mainPic.evented = false;
+        }
         canvas.isDrawingMode = !!value;
-        canvas.freeDrawingBrush.color = mode == 1 ? 'green' : 'red';
+        canvas.freeDrawingBrush.color = color || ( mode == 1 ? 'green' : 'red' );
+        canvas.freeDrawingCursor = cursor || canvas.freeDrawingCursor;
+        canvas.freeDrawingBrush.width = width || canvas.freeDrawingBrush.width;
         if ( canvas.isDrawingMode ) {
             this.$yax.show( );
             canvas.on( 'mouse:move', this.mover_cursor );
+            canvas.on( 'path:created', this._pathCreatedHandler );
         } else {
             this.$yax.hide( );
             canvas.off( 'mouse:move', this.mover_cursor );
+            canvas.off( 'path:created', this._pathCreatedHandler );
         }
-        canvas.freeDrawingBrush.width = 5;
         this.state.current_mode = mode;
         canvas.deactivateAll( ).renderAll( );
+    }
+    _pathCreatedHandler = ({ path }) => {
+        path.selectable = false
+        path.evented = false
+        path._left = path.left
+        path._top = path.top
     }
 
     getDrawingMode( ) {
@@ -315,7 +388,9 @@ class Core {
     }
 
     labelUnknown( ) {
+        console.time( 'labelUnknown' );
         const { state } = this
+        const { results } = state
         var segments = state.results.segments;
         if ( !state.results.background.length || !state.results.background.length ) {
             console.log( "Please mark both Background and Foreground" );
@@ -336,11 +411,51 @@ class Core {
             });
             var fgDist = Math.min.apply( null, fgList ); // _.reduce(fgList, function(memo, num){ return memo + num; }, 0) / fgList.length;
             var bgDist = Math.min.apply( null, bgList ); //_.reduce(bgList, function(memo, num){ return memo + num; }, 0) / bgList.length;
+
+            // 加入距离比较
+            let fgDis,
+                bgDis,
+                centerPox = {
+                    x: ( seg.max_x + seg.min_x ) / 2,
+                    y: ( seg.max_y + seg.min_y ) / 2
+                },
+                start_x = Math.ceil( centerPox.x - results.width / 4 ),
+                end_x = Math.ceil( centerPox.x + results.width / 4 ),
+                start_y = Math.ceil( centerPox.y - results.height / 4 ),
+                end_y = Math.ceil( centerPox.y + results.height / 4 ),
+                mask = state.mask_data.data,
+                min_f = results.height / 4,
+                min_b = results.height / 4;
+            start_x = start_x < 0 ? 0 : start_x;
+            start_y = start_y < 0 ? 0 : start_y;
+            end_x = end_x > results.width ? results.width : end_x;
+            end_y = end_y > results.height ? results.height : end_y;
+            for ( let x = start_x; x < end_x; x++ ) {
+                for ( let y = start_y; y < end_y; y++ ) {
+                    let ind = x + y * results.width
+                    let dis = Math.abs( centerPox.x - x ) + Math.abs( centerPox.y - y )
+                    if ( mask[4 * ind + 0] == 0 && mask[4 * ind + 1] == 128 ) {
+                        // f
+                        if ( dis < min_f ) {
+                            min_f = dis
+                        }
+                    }
+                    if ( mask[4 * ind + 0] > 0 && mask[4 * ind + 1] == 0 ) {
+                        // b
+                        if ( dis < min_b ) {
+                            min_b = dis
+                        }
+                    }
+                }
+            }
+            fgDist = min_f / results.height / 4 + fgDist / 10
+            bgDist = min_b / results.height / 4 + bgDist / 10
             if ( fgDist > bgDist ) {
                 seg.foreground = false;
                 seg.background = true
             }
         }
+        console.timeEnd( 'labelUnknown cost:' );
     }
 
     updateClusters( ) {
@@ -394,6 +509,13 @@ class Core {
                 seg.unknown = false;
                 seg.mixed = true;
                 state.results.mixed.push( s )
+                if ( seg.mask.b > seg.mask.f ) {
+                    seg.background = true;
+                    state.results.background.push( s )
+                } else {
+                    seg.foreground = true;
+                    state.results.foreground.push( s )
+                }
             } else {
                 seg.unknown = true;
                 state.results.unknown.push( s )
@@ -480,7 +602,7 @@ class Core {
     renderResults( ) {
         var results = this.state.results;
         var context = output_canvas.getContext( '2d' );
-        var imageData = context.createImageData( output_canvas.width, output_canvas.height );
+        var imageData = context.createImageData( this.width, this.height );
         var data = imageData.data;
         for ( var i = 0; i < results.indexMap.length; ++i ) {
             if ( results.segments[results.indexMap[i]].foreground ) {
@@ -568,7 +690,8 @@ class Core {
             this.refreshData( );
             if ( state.recompute ) {
                 state.options.slic.callback = this.callbackSegmentation;
-                SLICSegmentation( state.canvas_data, state.mask_data, state.options.slic );
+                // 计算超像素点
+                SLICSegmentation( state.canvas_data, state.options.slic );
                 console.log( "recomputing segmentation" )
             } else {
                 console.log( "Did not recompute, using previously computed superpixels." )
@@ -579,6 +702,66 @@ class Core {
         }
     }
 
+    renderSuperpixels( ) {
+        const { state } = this;
+        var results = state.results;
+        var context = output_canvas.getContext( '2d' );
+        var imageData = context.createImageData( output_canvas.width, output_canvas.height );
+        var data = imageData.data;
+        var seg;
+        for ( var i = 0; i < results.indexMap.length; ++i ) {
+            seg = results.segments[results.indexMap[i]];
+            data[4 * i + 3] = 255;
+            if (results.indexMap[i] == results.indexMap[i + 1]) { // Extremely naive pixel bondary
+                data[4 * i + 0] = seg.mp[0];
+                data[4 * i + 1] = seg.mp[1];
+                data[4 * i + 2] = seg.mp[2];
+            } else {
+                data[4 * i + 0] = 0;
+                data[4 * i + 1] = 0;
+                data[4 * i + 2] = 0;
+            }
+        }
+        context.putImageData( imageData, 0, 0 );
+    }
+    renderMixed( ) {
+        const { state } = this;
+        var results = state.results;
+        var context = output_canvas.getContext( '2d' );
+        var imageData = context.createImageData( output_canvas.width, output_canvas.height );
+        var data = imageData.data;
+        for ( var i = 0; i < results.indexMap.length; ++i ) {
+            if ( results.segments[results.indexMap[i]].mixed ) {
+                data[4 * i + 0] = results.rgbData[4 * i + 0];
+                data[4 * i + 1] = results.rgbData[4 * i + 1];
+                data[4 * i + 2] = results.rgbData[4 * i + 2];
+                data[4 * i + 3] = 255;
+            } else {
+                data[4 * i + 3] = 0;
+            }
+        }
+        context.putImageData( imageData, 0, 0 );
+
+    }
+
+    renderUnknown( ) {
+        const { state } = this;
+        var results = state.results;
+        var context = output_canvas.getContext( '2d' );
+        var imageData = context.createImageData( output_canvas.width, output_canvas.height );
+        var data = imageData.data;
+        for ( var i = 0; i < results.indexMap.length; ++i ) {
+            if ( results.segments[results.indexMap[i]].unknown ) {
+                data[4 * i + 0] = results.rgbData[4 * i + 0];
+                data[4 * i + 1] = results.rgbData[4 * i + 1];
+                data[4 * i + 2] = results.rgbData[4 * i + 2];
+                data[4 * i + 3] = 255;
+            } else {
+                data[4 * i + 3] = 0;
+            }
+        }
+        context.putImageData( imageData, 0, 0 );
+    }
     // del ??
     addOnClick( event ) {
         if ( event.layerX || event.layerX == 0 ) { // Firefox

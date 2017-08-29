@@ -374,7 +374,7 @@ function onSuccessImageLoad( image, options ) {
 }
 
 // Public API.
-const SLICSegmentation = function ( imageData, maskData, options ) {
+const SLICSegmentation = function ( imageData, options ) {
     if ( typeof options === 'undefined' )
         options = {};
 

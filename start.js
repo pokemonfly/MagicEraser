@@ -4,9 +4,17 @@ $( document ).ready( function ( ) {
     $( document ).on( 'click', '#btnLoad', function ( ) {
         $( '#imgfile' ).click( );
     }).on( 'click', '#drawingModeF', function ( ) {
-        me.setFreeDrawingMode( !me.getFreeDrawingMode( 1 ), 1 )
+        me.setFreeDrawingMode({
+            value: !me.getFreeDrawingMode( 1 ),
+            mode: 1,
+            width: 20
+        })
     }).on( 'click', '#drawingModeB', function ( ) {
-        me.setFreeDrawingMode( !me.getFreeDrawingMode( 2 ), 2 )
+        me.setFreeDrawingMode({
+            value: !me.getFreeDrawingMode( 2 ),
+            mode: 2,
+            width: 20
+        })
     }).on( 'click', '#segment', function ( ) {
         me.segment( );
     }).on( 'click', '#clear', function ( ) {
@@ -23,4 +31,5 @@ $( document ).ready( function ( ) {
         };
         fr.readAsDataURL( file );
     });
+    window.me = me;
 });
