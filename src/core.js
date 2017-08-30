@@ -21,6 +21,8 @@ class Core {
         this.network_train_editor
         this.network_test_editor
         this.state = {
+            history: [],
+            historyCur: -1,
             'images': [],
             'masks_present': false,
             'recompute': true,
@@ -42,9 +44,11 @@ class Core {
     init( ) {
         canvas.on( 'object:selected', this.updateScope )
         canvas.on( 'group:selected', this.updateScope )
-        canvas.on( 'path:created', this.updateScope )
+        // canvas.on( 'path:created', this.updateScope )
         canvas.on( 'selection:cleared', this.updateScope );
         canvas.on( 'object:moving', this.moveHandler )
+        canvas.on( 'mouse:move', this.mover_cursor );
+        canvas.on( 'path:created', this._pathCreatedHandler );
 
         this.$window = $( window )
         this.$canvas = $( '#canvas' )
@@ -67,13 +71,13 @@ class Core {
     moveHandler = ({ target }) => {
         // this._checkPos( target ); 遍历其他的图层 同步移动缩放
         canvas.forEachObject(( obj ) => {
-            if (!obj.isType( 'image' )) {
+            if ( obj._type != 'main' ) {
                 obj.setLeft( target.getLeft( ) + obj._left )
                 obj.setTop( target.getTop( ) + obj._top )
             }
         });
         canvas.sendToBack( target );
-        canvas.deactivateAll( ).renderAll( )
+        this.deselect( );
     }
 
     setZoom( scale ) {
@@ -110,8 +114,11 @@ class Core {
         fabric.Image.fromURL(src, ( oImg ) => {
             oImg.evented = false;
             oImg.selectable = false;
+            oImg._type = 'main'
             this.mainPic = oImg;
             canvas.add( oImg );
+            canvas.sendBackwards( oImg )
+            this.state.recompute = true;
         });
     }
     activeMainPic( ) {
@@ -124,6 +131,33 @@ class Core {
             'top': options.e.y + this.delta_top,
             'left': options.e.x + this.delta_left
         });
+    }
+    // 撤销与重做
+    backward( ) {
+        if (this.hasPrevStep( )) {
+            const { state } = this
+            let { history } = state
+            state.historyCur--;
+            state.mask_data = history[state.historyCur];
+            this._renderMask( state.mask_data )
+        }
+    }
+    forward( ) {
+        if (this.hasNextStep( )) {
+            const { state } = this
+            let { history } = state
+            state.historyCur++;
+            state.mask_data = history[state.historyCur];
+            this._renderMask( state.mask_data )
+        }
+    }
+    hasNextStep( ) {
+        const { history, historyCur } = this.state
+        return history.length - 1 > historyCur
+    }
+    hasPrevStep( ) {
+        const { history, historyCur } = this.state
+        return history.length - 1 >= historyCur && historyCur >= 0
     }
     getActiveStyle( styleName, object ) {
         object = object || canvas.getActiveObject( );
@@ -181,15 +215,13 @@ class Core {
     clear( ) {
         canvas.clear( );
     }
-    confirmClearMasks( ) {
-        if (confirm( 'Remove all masks. Are you sure?' )) {
-            canvas.forEachObject( function ( obj ) {
-                if (!obj.isType( 'image' )) {
-                    obj.remove( )
-                }
-            });
-            state.masks_present = false;
-        }
+    clearMasks( ) {
+        canvas.forEachObject( function ( obj ) {
+            if ( !obj._type != 'main' ) {
+                obj.remove( )
+            }
+        });
+        state.masks_present = false;
     }
 
     getConvnet( ) {
@@ -322,29 +354,118 @@ class Core {
             this.mainPic.selectable = false;
             this.mainPic.evented = false;
         }
+        if ( mode == 3 ) {
+            color = '#ffffff'
+        }
         canvas.isDrawingMode = !!value;
         canvas.freeDrawingBrush.color = color || ( mode == 1 ? 'green' : 'red' );
         canvas.freeDrawingCursor = cursor || canvas.freeDrawingCursor;
         canvas.freeDrawingBrush.width = width || canvas.freeDrawingBrush.width;
         if ( canvas.isDrawingMode ) {
             this.$yax.show( );
-            canvas.on( 'mouse:move', this.mover_cursor );
-            canvas.on( 'path:created', this._pathCreatedHandler );
         } else {
             this.$yax.hide( );
-            canvas.off( 'mouse:move', this.mover_cursor );
-            canvas.off( 'path:created', this._pathCreatedHandler );
         }
         this.state.current_mode = mode;
         canvas.deactivateAll( ).renderAll( );
     }
-    _pathCreatedHandler = ({ path }) => {
-        path.selectable = false
-        path.evented = false
-        path._left = path.left
-        path._top = path.top
-    }
+    _pathCreatedHandler = ( ) => {
+        const { state } = this
 
+        // 融合到mask层
+        canvas.forEachObject( function ( obj ) {
+            // if (!obj.isType( 'image' )) {
+            if ( obj._type != 'main' ) {
+                obj.opacity = 1.0;
+            } else {
+                obj.opacity = 0;
+            }
+        });
+        canvas.renderAll( );
+        const pathData = canvas.getContext( '2d' ).getImageData( 0, 0, this.height, this.width );
+        // state.mask_data = this.mergeData( state.mask_data, pathData )
+        state.mask_data = pathData
+        this._renderMask( state.mask_data )
+        // canvas.renderAll( ); 保存为历史
+        let { history, historyCur } = this.state
+        if ( historyCur != history.length - 1 ) {
+            // 删除后续的
+            history.splice( historyCur - history.length + 1 )
+        }
+        history.push( state.mask_data );
+        this.state.historyCur++
+    }
+    _renderMask( maskData ) {
+        let _d = [ ];
+        canvas.forEachObject( function ( obj ) {
+            if ( obj._type == 'main' ) {
+                obj.opacity = 1.0;
+            } else {
+                _d.push( obj )
+            }
+        });
+        _d.forEach(i => {
+            i.remove( )
+        });
+        if ( maskData ) {
+            fabric.Image.fromURL( this._getPicFromData( maskData ), function ( oImg ) {
+                oImg.selectable = false
+                oImg.evented = false
+                oImg.opacity = 0.6;
+                canvas.add( oImg );
+                canvas.renderAll( );
+            });
+        } else {
+            canvas.renderAll( );
+        }
+    }
+    // 把 data 数组 转换为base64
+    _getPicFromData({ data, width, height }) {
+        let c = document.createElement( 'canvas' );
+        c.setAttribute( 'id', '_temp_canvas' );
+        c.width = width;
+        c.height = height;
+
+        var context = c.getContext( '2d' ),
+            imageData = context.createImageData( c.width, c.height );
+        context.imageSmoothingEnabled = false;
+        for ( let i = 0; i < data.length; i += 4 ) {
+            let ind = i;
+            let r = data[i],
+                g = data[i + 1],
+                b = data[i + 2];
+            if ( data[ind] != 255 || data[ind + 1] != 255 || data[ind + 2] != 255 ) {
+                imageData.data[ind] = data[ind]
+                imageData.data[ind + 1] = data[ind + 1]
+                imageData.data[ind + 2] = data[ind + 2]
+                imageData.data[ind + 3] = data[ind + 3]
+            } else {
+                imageData.data[ind + 3] = 0
+            }
+        }
+
+        context.putImageData( imageData, 0, 0 );
+        let r = c.toDataURL( 'image/png' )
+        c = null;
+        return r;
+    }
+    //  画笔内容覆盖
+    mergeData( base, override ) {
+        if ( !base )
+            return override
+        let obj = base,
+            data = obj.data,
+            o_data = override.data;
+        for ( var i = 0; i < data.length; i += 4 ) {
+            if ( o_data[i] != 255 && o_data[i + 1] != 255 && o_data[i + 2] != 255 ) {
+                data[i] = o_data[i];
+                data[i + 1] = o_data[i + 1];
+                data[i + 2] = o_data[i + 2];
+                data[i + 3] = o_data[i + 3];
+            }
+        }
+        return obj
+    }
     getDrawingMode( ) {
         return this.state.freeDrawingMode;
     }
@@ -381,6 +502,7 @@ class Core {
         canvas.add( obj );
     }
 
+    // 输出结果作为输入
     updateCanvas( ) {
         fabric.Image.fromURL( output_canvas.toDataURL( 'png' ), function ( oImg ) {
             canvas.add( oImg );
@@ -388,7 +510,7 @@ class Core {
     }
 
     labelUnknown( ) {
-        console.time( 'labelUnknown' );
+        console.time( 'labelUnknown cost:' );
         const { state } = this
         const { results } = state
         var segments = state.results.segments;
@@ -448,6 +570,7 @@ class Core {
                     }
                 }
             }
+            // 均衡下距离和色差
             fgDist = min_f / results.height / 4 + fgDist / 10
             bgDist = min_b / results.height / 4 + bgDist / 10
             if ( fgDist > bgDist ) {
@@ -620,34 +743,23 @@ class Core {
     refreshData( ) {
         const { state } = this
         if ( state.recompute ) {
-            canvas.deactivateAll( ).renderAll( );
+            this.deselect( )
             canvas.forEachObject( function ( obj ) {
-                if (!obj.isType( 'image' )) {
+                if ( obj._type != 'main' ) {
                     obj.opacity = 0;
                 }
             });
             canvas.renderAll( );
             state.canvas_data = canvas.getContext( '2d' ).getImageData( 0, 0, this.height, this.width );
+            canvas.forEachObject( function ( obj ) {
+                if ( obj._type != 'main' ) {
+                    obj.opacity = 0.6;
+                }
+            });
+            canvas.renderAll( );
         } else {
             console.log( "did not recompute" )
         }
-        canvas.forEachObject( function ( obj ) {
-            if (!obj.isType( 'image' )) {
-                obj.opacity = 1.0;
-            } else {
-                obj.opacity = 0;
-            }
-        });
-        canvas.renderAll( );
-        state.mask_data = canvas.getContext( '2d' ).getImageData( 0, 0, this.height, this.width );
-        canvas.forEachObject( function ( obj ) {
-            if (obj.isType( 'image' )) {
-                obj.opacity = 1.0;
-            } else {
-                obj.opacity = 0.6;
-            }
-        });
-        canvas.renderAll( );
     }
 
     checkStatus( ) {
@@ -662,14 +774,14 @@ class Core {
         const { state } = this
 
         canvas.forEachObject( function ( obj ) {
-            if (!obj.isType( 'image' )) {
+            if ( obj._type != 'main' ) {
                 state.masks_present = true;
             }
         });
         let old_positions_joined = state.images.join( );
         state.images = [ ];
         canvas.forEachObject( function ( obj ) {
-            if (obj.isType( 'image' )) {
+            if ( obj._type != 'main' ) {
                 state.images.push([ obj.scaleX, obj.scaleY, obj.top, obj.left, obj.opacity ])
             }
         });
@@ -685,7 +797,7 @@ class Core {
         if ( state.masks_present ) {
             if ( canvas.isDrawingMode ) {
                 canvas.isDrawingMode = false;
-                canvas.deactivateAll( ).renderAll( );
+                this.deselect( )
             }
             this.refreshData( );
             if ( state.recompute ) {

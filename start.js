@@ -15,6 +15,16 @@ $( document ).ready( function ( ) {
             mode: 2,
             width: 20
         })
+    }).on( 'click', '#drawingModeE', function ( ) {
+        me.setFreeDrawingMode({
+            value: !me.getFreeDrawingMode( 3 ),
+            mode: 3,
+            width: 20
+        })
+    }).on( 'click', '#backward', function ( ) {
+        me.backward( );
+    }).on( 'click', '#forward', function ( ) {
+        me.forward( );
     }).on( 'click', '#segment', function ( ) {
         me.segment( );
     }).on( 'click', '#clear', function ( ) {

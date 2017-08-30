@@ -3,8 +3,6 @@
 
 ### TODO list
 - 限定区域
-- 橡皮擦
 - 裁剪结果
 - 算法优化(https://github.com/PSMM/SLIC-Superpixels/blob/master/slic.cpp)
 - 页面调试更新
-- 替换图片bug

@@ -58,7 +58,12 @@
                     <button id="drawingModeB" class="btn bg-red btn-app">
                   <i class="fa fa-pencil"></i> 画笔 -
                 </button>
+                    <button id="drawingModeE" class="btn bg-blue btn-app">
+                  <i class="fa fa-pencil"></i> Eraser
+                </button>
                     <button type="button" class="btn  bg-red btn-app" id="clear" ng-click="confirmClear()"><i class="fa fa-trash"></i>Clean editor</button>
+                    <button id="backward" class="btn btn-app btn-object-action"><i class="fa fa-step-backward"></i>Move back</button>
+                    <button id="forward" class="btn btn-app btn-object-action"><i class="fa fa-step-forward"></i>Move forward</button>
                 </div>
             </div>
             <div class="">
@@ -94,8 +99,7 @@
 
         <button type="button" class="btn btn-app btn-danger btn-object-action bg-maroon btn-move" id="remove-selected" ng-click="removeSelected()"><i class="fa fa-minus"></i>Delete</button>
         <button type="button" class="btn btn-app btn-default btn-object-action btn-move" id="duplicate" ng-click="duplicate()"><i class="fa fa-copy"></i>Duplicate</button>
-        <button id="send-backwards" class="btn btn-default btn-app btn-object-action btn-move" ng-click="sendBackwards()"><i class="fa fa-step-backward"></i>Move back</button>
-        <button id="bring-forward" class="btn btn-default btn-app btn-object-action btn-move" ng-click="bringForward()"><i class="fa fa-step-forward"></i>Move forward</button>
+
         <button id="send-to-back" class="btn btn-default btn-app btn-object-action btn-move" ng-click="sendToBack()"><i class="fa fa-backward"></i>Send to back</button>
         <button id="bring-to-front" class="btn btn-default btn-app btn-object-action btn-move" ng-click="bringToFront()"><i class="fa fa-forward"></i>Bring to front</button>
         <h5>Scale</h5>
