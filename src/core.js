@@ -2,24 +2,27 @@
 import SLICSegmentation from './slic-segmentation'
 const fabric = window.fabric;
 let canvas,
-    output_canvas;
+    outputCanvas;
 class Core {
     constructor( opt ) {
-        const { scale, width, height } = opt
-        canvas = new fabric.Canvas(opt.canvas, { scale, width, height })
-        output_canvas = document.getElementById( opt.outputCanvas )
+        $.extend( this, {
+            scale: 1,
+            delta_left: 0,
+            delta_top: 0
+        }, opt )
+        const { canvasScale, width, height } = this
+        canvas = new fabric.Canvas(this.canvas, {
+            scale: canvasScale,
+            width,
+            height
+        })
+        // outputCanvas = document.getElementById( this.outputCanvas )
+        outputCanvas = new fabric.Canvas(this.outputCanvas, {
+            scale: canvasScale,
+            width,
+            height
+        })
 
-        console.log( opt )
-        // this.width = canvas.getWidth( ) this.height = canvas.getHeight( )
-        this.width = width
-        this.height = height
-        this.scale = 1
-
-        this.delta_left = 0
-        this.delta_top = 0
-        this.network_editor
-        this.network_train_editor
-        this.network_test_editor
         this.state = {
             history: [],
             historyCur: -1,
@@ -39,6 +42,7 @@ class Core {
             convnet_mode: false,
             freeDrawingMode: 'Pencil'
         }
+        window.c = canvas;
     }
 
     init( ) {
@@ -52,7 +56,7 @@ class Core {
 
         this.$window = $( window )
         this.$canvas = $( '#canvas' )
-        this.$outputCanvas = $( '#output_canvas' )
+        this.$outputCanvas = $( '#' + this.outputCanvas )
         this.$yax = $( '#yaxis' );
         canvas.backgroundColor = '#ffffff';
         $( '#bg-color' ).val( '#ffffff' );
@@ -72,18 +76,21 @@ class Core {
         // this._checkPos( target ); 遍历其他的图层 同步移动缩放
         canvas.forEachObject(( obj ) => {
             if ( obj._type != 'main' ) {
-                obj.setLeft( target.getLeft( ) + obj._left )
-                obj.setTop( target.getTop( ) + obj._top )
+                obj.setLeft(target.getLeft( ))
+                obj.setTop(target.getTop( ))
             }
         });
         canvas.sendToBack( target );
         this.deselect( );
+        this.renderOutput( );
     }
 
     setZoom( scale ) {
+        this.scale = scale || this.scale
         canvas.setZoom( this.scale );
         this.updateScope( )
     }
+    // TODO
     _checkPos( obj ) {
         var left = obj.getLeft( ),
             top = obj.getTop( ),
@@ -140,6 +147,7 @@ class Core {
             state.historyCur--;
             state.mask_data = history[state.historyCur];
             this._renderMask( state.mask_data )
+            this.onHistoryChange && this.onHistoryChange( )
         }
     }
     forward( ) {
@@ -149,6 +157,7 @@ class Core {
             state.historyCur++;
             state.mask_data = history[state.historyCur];
             this._renderMask( state.mask_data )
+            this.onHistoryChange && this.onHistoryChange( )
         }
     }
     hasNextStep( ) {
@@ -265,13 +274,13 @@ class Core {
     }
 
     getResult( ) {
-        return output_canvas.toDataURL( 'png' );
+        return outputCanvas.toDataURL( 'png' );
     }
     export( ) {
         if (!fabric.Canvas.supports( 'toDataURL' )) {
             alert( 'This browser doesn\'t provide means to serialize canvas to an image' );
         } else {
-            fabric.Image.fromURL( output_canvas.toDataURL( ), function ( img ) {
+            fabric.Image.fromURL( outputCanvas.toDataURL( ), function ( img ) {
                 canvas.add( img );
                 img.bringToFront( );
                 canvas.renderAll( );
@@ -308,15 +317,14 @@ class Core {
 
     resetZoom( ) {
         const { state } = this;
-        var newZoom = 1.0;
         canvas.absolutePan({ x: 0, y: 0 });
-        canvas.setZoom( newZoom );
+        canvas.setZoom( 1 )
         state.recompute = true;
-        renderVieportBorders( );
-        console.log( "zoom reset" );
         return false;
     }
-
+    zoomToPoint( ) {
+        canvas.zoomToPoint.apply( canvas, arguments )
+    }
     sendBackwards( ) {
         var activeObject = canvas.getActiveObject( );
         if ( activeObject ) {
@@ -361,6 +369,7 @@ class Core {
         canvas.freeDrawingBrush.color = color || ( mode == 1 ? 'green' : 'red' );
         canvas.freeDrawingCursor = cursor || canvas.freeDrawingCursor;
         canvas.freeDrawingBrush.width = width || canvas.freeDrawingBrush.width;
+        canvas.freeDrawingBrush.width /= this.scale
         if ( canvas.isDrawingMode ) {
             this.$yax.show( );
         } else {
@@ -370,8 +379,15 @@ class Core {
         canvas.deactivateAll( ).renderAll( );
     }
     _pathCreatedHandler = ( ) => {
-        const { state } = this
-
+        const { state } = this;
+        // 保存当前缩放状态
+        let left = 0,
+            top = 0;
+        if ( this.mainPic ) {
+            left = this.mainPic.getLeft( ),
+            top = this.mainPic.getTop( )
+        }
+        this.resetZoom( );
         // 融合到mask层
         canvas.forEachObject( function ( obj ) {
             // if (!obj.isType( 'image' )) {
@@ -385,15 +401,18 @@ class Core {
         const pathData = canvas.getContext( '2d' ).getImageData( 0, 0, this.height, this.width );
         // state.mask_data = this.mergeData( state.mask_data, pathData )
         state.mask_data = pathData
+        this.setZoom( )
         this._renderMask( state.mask_data )
-        // canvas.renderAll( ); 保存为历史
+
+        // 保存为历史
         let { history, historyCur } = this.state
         if ( historyCur != history.length - 1 ) {
             // 删除后续的
             history.splice( historyCur - history.length + 1 )
         }
         history.push( state.mask_data );
-        this.state.historyCur++
+        this.state.historyCur++;
+        this.onHistoryChange && this.onHistoryChange( )
     }
     _renderMask( maskData ) {
         let _d = [ ];
@@ -504,7 +523,7 @@ class Core {
 
     // 输出结果作为输入
     updateCanvas( ) {
-        fabric.Image.fromURL( output_canvas.toDataURL( 'png' ), function ( oImg ) {
+        fabric.Image.fromURL( outputCanvas.toDataURL( 'png' ), function ( oImg ) {
             canvas.add( oImg );
         });
     }
@@ -724,7 +743,7 @@ class Core {
 
     renderResults( ) {
         var results = this.state.results;
-        var context = output_canvas.getContext( '2d' );
+        var context = outputCanvas.getContext( '2d' );
         var imageData = context.createImageData( this.width, this.height );
         var data = imageData.data;
         for ( var i = 0; i < results.indexMap.length; ++i ) {
@@ -737,12 +756,28 @@ class Core {
                 data[4 * i + 3] = 0;
             }
         }
-        context.putImageData( imageData, 0, 0 );
+        // context.putImageData( imageData, 0, 0 );
+        this.outputImage = this._getPicFromData( imageData )
+        this.renderOutput( )
+    }
+    renderOutput( ) {
+        if ( this.outputImage ) {
+            outputCanvas.clear( )
+            outputCanvas.setZoom( this.scale );
+            fabric.Image.fromURL(this.outputImage, ( oImg ) => {
+                // oImg.selectable = false oImg.evented = false
+                oImg.left = this.mainPic.left
+                oImg.top = this.mainPic.top
+                outputCanvas.add( oImg );
+                outputCanvas.renderAll( );
+            });
+        }
     }
 
     refreshData( ) {
         const { state } = this
         if ( state.recompute ) {
+            this.resetZoom( )
             this.deselect( )
             canvas.forEachObject( function ( obj ) {
                 if ( obj._type != 'main' ) {
@@ -756,6 +791,7 @@ class Core {
                     obj.opacity = 0.6;
                 }
             });
+            this.setZoom( )
             canvas.renderAll( );
         } else {
             console.log( "did not recompute" )
@@ -817,8 +853,8 @@ class Core {
     renderSuperpixels( ) {
         const { state } = this;
         var results = state.results;
-        var context = output_canvas.getContext( '2d' );
-        var imageData = context.createImageData( output_canvas.width, output_canvas.height );
+        var context = outputCanvas.getContext( '2d' );
+        var imageData = context.createImageData( outputCanvas.width, outputCanvas.height );
         var data = imageData.data;
         var seg;
         for ( var i = 0; i < results.indexMap.length; ++i ) {
@@ -839,8 +875,8 @@ class Core {
     renderMixed( ) {
         const { state } = this;
         var results = state.results;
-        var context = output_canvas.getContext( '2d' );
-        var imageData = context.createImageData( output_canvas.width, output_canvas.height );
+        var context = outputCanvas.getContext( '2d' );
+        var imageData = context.createImageData( outputCanvas.width, outputCanvas.height );
         var data = imageData.data;
         for ( var i = 0; i < results.indexMap.length; ++i ) {
             if ( results.segments[results.indexMap[i]].mixed ) {
@@ -859,8 +895,8 @@ class Core {
     renderUnknown( ) {
         const { state } = this;
         var results = state.results;
-        var context = output_canvas.getContext( '2d' );
-        var imageData = context.createImageData( output_canvas.width, output_canvas.height );
+        var context = outputCanvas.getContext( '2d' );
+        var imageData = context.createImageData( outputCanvas.width, outputCanvas.height );
         var data = imageData.data;
         for ( var i = 0; i < results.indexMap.length; ++i ) {
             if ( results.segments[results.indexMap[i]].unknown ) {

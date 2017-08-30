@@ -12,7 +12,8 @@ import template from './template';
             fabric: fabric,
             width: 800,
             height: 800,
-            scale: 0.625
+            canvasScale: 0.625,
+            onHistoryChange: null
         }, opt );
         let core = new Core( opt );
         core.init( );

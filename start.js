@@ -21,14 +21,23 @@ $( document ).ready( function ( ) {
             mode: 3,
             width: 20
         })
+    }).on( 'change', '#scale', function ( ) {
+        var val = $( this ).val( );
+        me.setZoom( val / 100 )
+        // me.zoomToPoint( {     x: 400,     y: 400 }, val / 100 );
+        me.activeMainPic( )
     }).on( 'click', '#backward', function ( ) {
         me.backward( );
+    }).on( 'click', '#download', function ( ) {
+        me.download( );
     }).on( 'click', '#forward', function ( ) {
         me.forward( );
     }).on( 'click', '#segment', function ( ) {
         me.segment( );
     }).on( 'click', '#clear', function ( ) {
         me.confirmClear( )
+    }).on( 'click', '#resetZoom', function ( ) {
+        me.resetZoom( )
     }).on( 'change', '#imgfile', function ( ) {
         file = this.files[0];
         fr = new FileReader( );
