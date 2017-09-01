@@ -2,13 +2,17 @@
 import SLICSegmentation from './slic-segmentation'
 const fabric = window.fabric;
 let canvas,
-    outputCanvas;
+    outputCanvas,
+    curX,
+    curY;
 class Core {
     constructor( opt ) {
         $.extend( this, {
             scale: 1,
             delta_left: 0,
-            delta_top: 0
+            delta_top: 0,
+            magnifyingSize: 0.3,
+            magnifyingScale: 2
         }, opt )
         const { canvasScale, width, height } = this
         canvas = new fabric.Canvas(this.canvas, {
@@ -16,7 +20,6 @@ class Core {
             width,
             height
         })
-        // outputCanvas = document.getElementById( this.outputCanvas )
         outputCanvas = new fabric.Canvas(this.outputCanvas, {
             scale: canvasScale,
             width,
@@ -29,6 +32,7 @@ class Core {
             'images': [],
             'masks_present': false,
             'recompute': true,
+            reoutput: true,
             'results': {},
             canvas_data: null,
             mask_data: null,
@@ -46,16 +50,20 @@ class Core {
     }
 
     init( ) {
-        canvas.on( 'object:selected', this.updateScope )
+        canvas.on( 'object:selected', this.selectHander )
         canvas.on( 'group:selected', this.updateScope )
         // canvas.on( 'path:created', this.updateScope )
         canvas.on( 'selection:cleared', this.updateScope );
         canvas.on( 'object:moving', this.moveHandler )
-        canvas.on( 'mouse:move', this.mover_cursor );
+        canvas.on( 'mouse:move', this.magnifying );
         canvas.on( 'path:created', this._pathCreatedHandler );
+        // 放大镜
+        canvas.on( 'mouse:move', this.mover_cursor );
+        // 同步移动
+        outputCanvas.on( 'object:moving', this.outputMoveHandler )
 
         this.$window = $( window )
-        this.$canvas = $( '#canvas' )
+        this.$canvas = $( '#' + this.canvas )
         this.$outputCanvas = $( '#' + this.outputCanvas )
         this.$yax = $( '#yaxis' );
         canvas.backgroundColor = '#ffffff';
@@ -72,6 +80,49 @@ class Core {
     updateScope( ) {
         canvas.renderAll( );
     }
+    selectHander = ({ target }) => {
+        canvas.sendToBack( target );
+        this.deselect( );
+    }
+    magnifying = ( options ) => {
+        if ( !this.mainPic )
+            return;
+        const { layerX, layerY } = options.e,
+            size = this.width * this.magnifyingSize / this.magnifyingScale,
+            x = layerX,
+            y = layerY;
+        const data = canvas.getContext( '2d' ).getImageData( 0, 0, this.width, this.height )
+
+        curX = x / this.canvasScale
+        curY = y / this.canvasScale
+        if ( this._magnifyingPic ) {
+            this._magnifyingPic.left = -curX * this.magnifyingScale + size / 2 * this.magnifyingScale
+            this._magnifyingPic.top = -curY * this.magnifyingScale + size / 2 * this.magnifyingScale
+            canvas.renderAll( );
+        } else {
+            fabric.Image.fromURL(this._getPicFromData( data ), ( obj ) => {
+                obj.evented = obj.hasControls = obj.hasBorders = false
+                obj.set( "top", 0 );
+                obj.set( "left", 0 );
+                obj.scale( this.magnifyingScale )
+                obj.clipTo = ( ctx ) => {
+                    if ( curX + size / 2 > this.width ) {
+                        curX = this.width - size / 2
+                    }
+                    let px = ( curX - this.width / 2 - size / 2 ),
+                        py = ( curY - this.height / 2 - size / 2 );
+                    if ( py + size > this.height ) {
+                        py = this.height - size
+                    }
+                    ctx.rect( px, py, size, size );
+                    ctx.stroke( );
+                }
+                this._magnifyingPic = obj;
+                canvas.add( obj );
+                canvas.renderAll( );
+            });
+        }
+    }
     moveHandler = ({ target }) => {
         // this._checkPos( target ); 遍历其他的图层 同步移动缩放
         canvas.forEachObject(( obj ) => {
@@ -84,11 +135,30 @@ class Core {
         this.deselect( );
         this.renderOutput( );
     }
-
+    outputMoveHandler = ({ target }) => {
+        let left = target.getLeft( ),
+            top = target.getTop( );
+        canvas.forEachObject(( obj ) => {
+            obj.setLeft( left )
+            obj.setTop( top )
+        });
+        this.deselect( );
+    }
+    reset( ) {
+        const { state } = this
+        state.history = [ ]
+        state.historyCur = -1
+        this.scale = 1
+        this.outputImage = null
+        outputCanvas.clear( )
+        outputCanvas.renderAll( )
+        this.onHistoryChange && this.onHistoryChange( )
+    }
     setZoom( scale ) {
         this.scale = scale || this.scale
         canvas.setZoom( this.scale );
         this.updateScope( )
+        this.renderOutput( )
     }
     // TODO
     _checkPos( obj ) {
@@ -121,6 +191,7 @@ class Core {
         fabric.Image.fromURL(src, ( oImg ) => {
             oImg.evented = false;
             oImg.selectable = false;
+            oImg.hasControls = oImg.hasBorders = false
             oImg._type = 'main'
             this.mainPic = oImg;
             canvas.add( oImg );
@@ -129,9 +200,11 @@ class Core {
         });
     }
     activeMainPic( ) {
-        this.mainPic.selectable = true;
-        this.mainPic.evented = true;
-        canvas.isDrawingMode = false;
+        if ( this.mainPic ) {
+            this.mainPic.selectable = true;
+            this.mainPic.evented = true;
+            canvas.isDrawingMode = false;
+        }
     }
     mover_cursor = ( options ) => {
         this.$yax.css({
@@ -274,7 +347,13 @@ class Core {
     }
 
     getResult( ) {
-        return outputCanvas.toDataURL( 'png' );
+        if ( !this.outputImage ) {
+            return null
+        }
+        this.renderOutput( true )
+        let r = outputCanvas.toDataURL( 'png' );
+        this.renderOutput( )
+        return r;
     }
     export( ) {
         if (!fabric.Canvas.supports( 'toDataURL' )) {
@@ -320,7 +399,7 @@ class Core {
         canvas.absolutePan({ x: 0, y: 0 });
         canvas.setZoom( 1 )
         state.recompute = true;
-        return false;
+        this.renderOutput( )
     }
     zoomToPoint( ) {
         canvas.zoomToPoint.apply( canvas, arguments )
@@ -760,17 +839,33 @@ class Core {
         this.outputImage = this._getPicFromData( imageData )
         this.renderOutput( )
     }
-    renderOutput( ) {
+    renderOutput( isReset ) {
+        const { state } = this
         if ( this.outputImage ) {
-            outputCanvas.clear( )
-            outputCanvas.setZoom( this.scale );
-            fabric.Image.fromURL(this.outputImage, ( oImg ) => {
-                // oImg.selectable = false oImg.evented = false
-                oImg.left = this.mainPic.left
-                oImg.top = this.mainPic.top
-                outputCanvas.add( oImg );
+            let scale = this.scale,
+                left = this.mainPic.left,
+                top = this.mainPic.top
+            if ( isReset ) {
+                scale = 1;
+                left = top = 0;
+            }
+            outputCanvas.setZoom( scale );
+            if ( state.reoutput ) {
+                outputCanvas.clear( )
+                fabric.Image.fromURL(this.outputImage, ( oImg ) => {
+                    oImg.hasControls = oImg.hasBorders = false
+                    oImg.left = left
+                    oImg.top = top
+                    this.outputPic = oImg;
+                    outputCanvas.add( oImg );
+                    outputCanvas.renderAll( );
+                    state.reoutput = false;
+                });
+            } else {
+                this.outputPic.left = left
+                this.outputPic.top = top
                 outputCanvas.renderAll( );
-            });
+            }
         }
     }
 
@@ -847,6 +942,7 @@ class Core {
             this.updateClusters( );
             this.renderResults( );
             state.recompute = false;
+            state.reoutput = true;
         }
     }
 
